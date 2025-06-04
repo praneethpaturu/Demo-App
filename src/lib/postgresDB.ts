@@ -1,5 +1,12 @@
 // PostgreSQL database implementation
-import { Client } from "pg";
+// Import pg conditionally to avoid Cloudflare Workers issues
+let Client: any = null;
+try {
+  const pg = await import("pg");
+  Client = pg.Client;
+} catch (error) {
+  console.warn("PostgreSQL client not available:", error);
+}
 
 interface User {
   id: string;
@@ -27,13 +34,26 @@ class PostgresDatabase {
 
   constructor() {
     // Default connection string for local development
-    this.connectionString =
-      process.env.DATABASE_URL ||
-      "postgresql://postgres:password@localhost:5432/testdb";
+    let databaseUrl = "postgresql://postgres:password@localhost:5432/testdb";
+    try {
+      if (typeof process !== "undefined" && process.env) {
+        databaseUrl = process.env.DATABASE_URL || databaseUrl;
+      }
+    } catch (error) {
+      console.warn(
+        "Process environment not available, using default database URL",
+      );
+    }
+    this.connectionString = databaseUrl;
   }
 
   async connect(): Promise<boolean> {
     try {
+      if (!Client) {
+        console.warn("PostgreSQL client not available, skipping connection");
+        return false;
+      }
+
       this.client = new Client({
         connectionString: this.connectionString,
       });
@@ -177,7 +197,7 @@ class PostgresDatabase {
 
   // Auth methods
   async signInWithPassword(email: string, password: string) {
-    if (!this.client) throw new Error("Database not connected");
+    if (!this.client || !Client) throw new Error("Database not connected");
 
     try {
       const result = await this.client.query(
@@ -212,7 +232,7 @@ class PostgresDatabase {
   }
 
   async getSession() {
-    if (!this.client) throw new Error("Database not connected");
+    if (!this.client || !Client) throw new Error("Database not connected");
 
     try {
       // For PostgreSQL, we'll get the first user as a test session
@@ -244,7 +264,7 @@ class PostgresDatabase {
 
   // Data methods
   async fetchData(userId: string) {
-    if (!this.client) throw new Error("Database not connected");
+    if (!this.client || !Client) throw new Error("Database not connected");
 
     try {
       const result = await this.client.query(
@@ -262,7 +282,7 @@ class PostgresDatabase {
   }
 
   async createItem(item: Omit<DataItem, "id" | "created_at" | "updated_at">) {
-    if (!this.client) throw new Error("Database not connected");
+    if (!this.client || !Client) throw new Error("Database not connected");
 
     try {
       const result = await this.client.query(
@@ -287,7 +307,7 @@ class PostgresDatabase {
   }
 
   async updateItem(id: string, updates: Partial<DataItem>) {
-    if (!this.client) throw new Error("Database not connected");
+    if (!this.client || !Client) throw new Error("Database not connected");
 
     try {
       const setParts = [];
@@ -325,7 +345,7 @@ class PostgresDatabase {
   }
 
   async deleteItem(id: string) {
-    if (!this.client) throw new Error("Database not connected");
+    if (!this.client || !Client) throw new Error("Database not connected");
 
     try {
       const result = await this.client.query(
@@ -376,7 +396,7 @@ class PostgresDatabase {
 
   // Clear all data (useful for testing)
   async clearAll() {
-    if (!this.client) throw new Error("Database not connected");
+    if (!this.client || !Client) throw new Error("Database not connected");
 
     try {
       await this.client.query("DELETE FROM data_items");
