@@ -263,8 +263,14 @@ class ApiService {
   async healthCheck() {
     try {
       const response = await fetch(`${this.baseUrl}/health`);
-      return response.ok;
-    } catch {
+      if (response.ok) {
+        const data = await response.json();
+        console.log("API Health Check:", data);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.warn("API health check failed:", error);
       return false;
     }
   }

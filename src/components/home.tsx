@@ -65,6 +65,14 @@ const Home = () => {
         setApiStatus(apiAvailable ? "connected" : "offline");
 
         if (apiAvailable) {
+          console.log("✅ Express.js API server is running and connected");
+        } else {
+          console.log(
+            "⚠️ Express.js API server not available, using fallback database",
+          );
+        }
+
+        if (apiAvailable) {
           // Use API service
           const { data, error } = await apiService.getSession();
           if (error) throw new Error(error);
