@@ -56,7 +56,9 @@ interface DataItem {
 interface DashboardProps {
   session?: any;
   supabase?: any;
+  apiService?: any;
   isLocalDb?: boolean;
+  isUsingApi?: boolean;
   token?: string;
   onLogout?: () => void;
 }
@@ -64,7 +66,9 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({
   session,
   supabase,
+  apiService,
   isLocalDb = false,
+  isUsingApi = false,
   token = "mock-token",
   onLogout = () => {},
 }) => {
@@ -116,7 +120,12 @@ const Dashboard: React.FC<DashboardProps> = ({
     setError(null);
 
     try {
-      if (isLocalDb && supabase && session?.user?.id) {
+      if (isUsingApi && apiService) {
+        // Use API service
+        const { data: items, error } = await apiService.fetchData();
+        if (error) throw new Error(error);
+        setData(items || []);
+      } else if (isLocalDb && supabase && session?.user?.id) {
         // Use local database
         const { data: items, error } = await supabase.fetchData(
           session.user.id,
@@ -165,7 +174,30 @@ const Dashboard: React.FC<DashboardProps> = ({
 
   const handleFormSubmit = async (formData: Partial<DataItem>) => {
     try {
-      if (isLocalDb && supabase && session?.user?.id) {
+      if (isUsingApi && apiService) {
+        // Use API service
+        if (formMode === "create") {
+          const { data: newItem, error } = await apiService.createItem({
+            name: formData.name || "",
+            description: formData.description || "",
+            status: formData.status || "pending",
+            category: formData.category,
+            quantity: formData.quantity,
+          });
+          if (error) throw new Error(error);
+          setData([...data, newItem]);
+        } else if (formMode === "edit" && selectedItem) {
+          const { data: updatedItem, error } = await apiService.updateItem(
+            selectedItem.id,
+            formData,
+          );
+          if (error) throw new Error(error);
+          const updatedData = data.map((item) =>
+            item.id === selectedItem.id ? updatedItem : item,
+          );
+          setData(updatedData);
+        }
+      } else if (isLocalDb && supabase && session?.user?.id) {
         if (formMode === "create") {
           const { data: newItem, error } = await supabase.createItem({
             name: formData.name || "",
@@ -220,7 +252,11 @@ const Dashboard: React.FC<DashboardProps> = ({
     if (!deleteItemId) return;
 
     try {
-      if (isLocalDb && supabase) {
+      if (isUsingApi && apiService) {
+        // Use API service
+        const { error } = await apiService.deleteItem(deleteItemId);
+        if (error) throw new Error(error);
+      } else if (isLocalDb && supabase) {
         const { error } = await supabase.deleteItem(deleteItemId);
         if (error) throw error;
       } else {
@@ -266,7 +302,12 @@ const Dashboard: React.FC<DashboardProps> = ({
           <div>
             <CardTitle className="text-2xl font-bold">Dashboard</CardTitle>
             <CardDescription>
-              Manage your data entries {isLocalDb && "(Local Database)"}
+              Manage your data entries{" "}
+              {isUsingApi
+                ? "(API Mode)"
+                : isLocalDb
+                  ? "(Local Database)"
+                  : "(Mock Data)"}
             </CardDescription>
           </div>
           <div className="flex space-x-2">

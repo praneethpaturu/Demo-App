@@ -3,6 +3,8 @@ import { createClient } from "@supabase/supabase-js";
 import LoginForm from "./LoginForm";
 import Dashboard from "./Dashboard";
 import LocalDatabase from "../lib/localDatabase";
+import ApiService from "../lib/apiService";
+import MockApiServer from "../lib/mockApiServer";
 
 // Create a Supabase client with proper error handling
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -13,6 +15,8 @@ const environment = import.meta.env.VITE_APP_ENV || "development";
 const supabase =
   supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 const localDb = new LocalDatabase();
+const apiService = new ApiService();
+const mockApiServer = new MockApiServer();
 
 const Home = () => {
   const [session, setSession] = useState<any>(null);
@@ -23,14 +27,27 @@ const Home = () => {
   const [isUsingLocalDb, setIsUsingLocalDb] = useState<boolean>(
     environment === "test" || !supabase,
   );
+  const [isUsingApi, setIsUsingApi] = useState<boolean>(false);
+  const [apiStatus, setApiStatus] = useState<string>("checking");
 
   useEffect(() => {
-    // Check for existing session
+    // Check API availability and existing session
     const checkSession = async () => {
       try {
         setCurrentEnvironment(environment);
 
-        if (environment === "test" || !supabase) {
+        // Check if API is available
+        const apiAvailable = await apiService.healthCheck();
+        setIsUsingApi(apiAvailable);
+        setApiStatus(apiAvailable ? "connected" : "offline");
+
+        if (apiAvailable) {
+          // Use API service
+          const { data, error } = await apiService.getSession();
+          if (error) throw new Error(error);
+          setSession(data.session);
+          setIsUsingLocalDb(false);
+        } else if (environment === "test" || !supabase) {
           // Use local database
           setIsUsingLocalDb(true);
           const { data, error } = await localDb.getSession();
@@ -77,7 +94,12 @@ const Home = () => {
       setLoading(true);
 
       let result;
-      if (isUsingLocalDb) {
+      if (isUsingApi) {
+        // Use API service
+        const apiResult = await apiService.login(email, password);
+        if (apiResult.error) throw new Error(apiResult.error);
+        result = { data: apiResult.data, error: null };
+      } else if (isUsingLocalDb) {
         result = await localDb.signInWithPassword(email, password);
       } else if (supabase) {
         result = await supabase.auth.signInWithPassword({
@@ -105,7 +127,12 @@ const Home = () => {
       setLoading(true);
 
       let result;
-      if (isUsingLocalDb) {
+      if (isUsingApi) {
+        // Use API service
+        const apiResult = await apiService.logout();
+        if (apiResult.error) throw new Error(apiResult.error);
+        result = { error: null };
+      } else if (isUsingLocalDb) {
         result = await localDb.signOut();
       } else if (supabase) {
         result = await supabase.auth.signOut();
@@ -144,9 +171,19 @@ const Home = () => {
             <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
               {currentEnvironment}
             </span>
-            {isUsingLocalDb && (
+            {isUsingApi && (
+              <span className="rounded-full bg-green-100 text-green-800 px-2 py-1 text-xs font-medium">
+                API Connected
+              </span>
+            )}
+            {isUsingLocalDb && !isUsingApi && (
               <span className="rounded-full bg-yellow-100 text-yellow-800 px-2 py-1 text-xs font-medium">
                 Local DB
+              </span>
+            )}
+            {!isUsingApi && !isUsingLocalDb && supabase && (
+              <span className="rounded-full bg-blue-100 text-blue-800 px-2 py-1 text-xs font-medium">
+                Supabase
               </span>
             )}
           </div>
@@ -168,7 +205,18 @@ const Home = () => {
           </div>
         )}
 
-        {isUsingLocalDb && (
+        {isUsingApi && (
+          <div className="mb-6 rounded-lg border border-green-200 bg-green-50 p-4">
+            <h3 className="text-sm font-medium text-green-800 mb-2">
+              API Mode - Connected
+            </h3>
+            <p className="text-xs text-green-600">
+              Using API endpoints with local database fallback. Test
+              credentials: test@example.com / password123
+            </p>
+          </div>
+        )}
+        {isUsingLocalDb && !isUsingApi && (
           <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
             <h3 className="text-sm font-medium text-blue-800 mb-2">
               Local Database Mode
@@ -183,8 +231,10 @@ const Home = () => {
         {session ? (
           <Dashboard
             session={session}
-            supabase={isUsingLocalDb ? localDb : supabase}
-            isLocalDb={isUsingLocalDb}
+            supabase={isUsingApi ? null : isUsingLocalDb ? localDb : supabase}
+            apiService={isUsingApi ? apiService : null}
+            isLocalDb={isUsingLocalDb && !isUsingApi}
+            isUsingApi={isUsingApi}
           />
         ) : (
           <div className="mx-auto max-w-md">
