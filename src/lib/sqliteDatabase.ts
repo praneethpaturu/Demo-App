@@ -186,7 +186,7 @@ class SQLiteDatabase {
         resolve({
           data: {
             session: {
-              access_token: `indexeddb_token_${user.id}`,
+              access_token: `sqlite_token_${user.id}`,
               user: {
                 id: user.id,
                 email: user.email,
@@ -222,7 +222,7 @@ class SQLiteDatabase {
           resolve({
             data: {
               session: {
-                access_token: `indexeddb_token_${user.id}`,
+                access_token: `sqlite_token_${user.id}`,
                 user: {
                   id: user.id,
                   email: user.email,
@@ -276,7 +276,7 @@ class SQLiteDatabase {
 
     const newItem: DataItem = {
       ...item,
-      id: `indexeddb_${Date.now()}`,
+      id: `sqlite_${Date.now()}`,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     };
