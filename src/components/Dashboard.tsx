@@ -134,10 +134,13 @@ const Dashboard: React.FC<DashboardProps> = ({
         );
         if (error) throw error;
         setData(items || []);
-      } else {
-        // Fallback to mock data
+      } else if (session?.user?.id) {
+        // Fallback to mock data with session check
         await new Promise((resolve) => setTimeout(resolve, 1000));
         setData(mockData);
+      } else {
+        // No session available
+        throw new Error("No valid session found. Please log in again.");
       }
     } catch (err) {
       setError(

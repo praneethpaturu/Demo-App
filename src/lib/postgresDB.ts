@@ -36,7 +36,12 @@ class PostgresDatabase {
     // Default connection string for local development
     let databaseUrl = "postgresql://postgres:password@localhost:5432/testdb";
     try {
-      if (typeof process !== "undefined" && process.env) {
+      // Check if we're in a browser environment
+      if (
+        typeof window === "undefined" &&
+        typeof process !== "undefined" &&
+        process.env
+      ) {
         databaseUrl = process.env.DATABASE_URL || databaseUrl;
       }
     } catch (error) {

@@ -117,6 +117,11 @@ class ApiService {
 
         case endpoint === "/auth/session" && method === "GET":
           const sessionResult = await db.getSession();
+          // If we have a session, make sure to set the token for future requests
+          if (sessionResult.data?.session?.access_token) {
+            this.token = sessionResult.data.session.access_token;
+            localStorage.setItem("auth_token", this.token);
+          }
           return { data: sessionResult.data, status: 200 };
 
         case endpoint.startsWith("/data") && method === "GET":
@@ -188,6 +193,11 @@ class ApiService {
 
   async getSession() {
     const response = await this.makeRequest<any>("/auth/session");
+    // If we got a session from the fallback, make sure to set the token
+    if (response.data?.session?.access_token && !this.token) {
+      this.token = response.data.session.access_token;
+      localStorage.setItem("auth_token", this.token);
+    }
     return response;
   }
 
