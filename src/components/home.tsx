@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 import LoginForm from "./LoginForm";
 import Dashboard from "./Dashboard";
 import LocalDatabase from "../lib/localDatabase";
+import PostgresDatabase from "../lib/postgresDB";
 import ApiService from "../lib/apiService";
 import MockApiServer from "../lib/mockApiServer";
 
@@ -15,6 +16,7 @@ const environment = import.meta.env.VITE_APP_ENV || "development";
 const supabase =
   supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 const localDb = new LocalDatabase();
+const postgresDb = new PostgresDatabase();
 const apiService = new ApiService();
 const mockApiServer = new MockApiServer();
 
@@ -27,14 +29,21 @@ const Home = () => {
   const [isUsingLocalDb, setIsUsingLocalDb] = useState<boolean>(
     environment === "test" || !supabase,
   );
+  const [isUsingPostgres, setIsUsingPostgres] = useState<boolean>(false);
   const [isUsingApi, setIsUsingApi] = useState<boolean>(false);
   const [apiStatus, setApiStatus] = useState<string>("checking");
+  const [dbStatus, setDbStatus] = useState<string>("checking");
 
   useEffect(() => {
     // Check API availability and existing session
     const checkSession = async () => {
       try {
         setCurrentEnvironment(environment);
+
+        // Initialize PostgreSQL connection
+        const postgresConnected = await apiService.initializePostgres();
+        setIsUsingPostgres(postgresConnected);
+        setDbStatus(postgresConnected ? "postgres" : "localStorage");
 
         // Check if API is available
         const apiAvailable = await apiService.healthCheck();
@@ -48,9 +57,10 @@ const Home = () => {
           setSession(data.session);
           setIsUsingLocalDb(false);
         } else if (environment === "test" || !supabase) {
-          // Use local database
+          // Use local database (PostgreSQL or localStorage)
           setIsUsingLocalDb(true);
-          const { data, error } = await localDb.getSession();
+          const db = postgresConnected ? postgresDb : localDb;
+          const { data, error } = await db.getSession();
           if (error) throw error;
           setSession(data.session);
         } else {
@@ -73,7 +83,8 @@ const Home = () => {
     // Set up auth state listener
     let authListener: any = null;
     if (isUsingLocalDb) {
-      const { data } = localDb.onAuthStateChange((_event, session) => {
+      const db = isUsingPostgres ? postgresDb : localDb;
+      const { data } = db.onAuthStateChange((_event, session) => {
         setSession(session);
       });
       authListener = data;
@@ -87,7 +98,7 @@ const Home = () => {
     return () => {
       authListener?.subscription.unsubscribe();
     };
-  }, [isUsingLocalDb]);
+  }, [isUsingLocalDb, isUsingPostgres]);
 
   const handleLogin = async (email: string, password: string) => {
     try {
@@ -100,7 +111,8 @@ const Home = () => {
         if (apiResult.error) throw new Error(apiResult.error);
         result = { data: apiResult.data, error: null };
       } else if (isUsingLocalDb) {
-        result = await localDb.signInWithPassword(email, password);
+        const db = isUsingPostgres ? postgresDb : localDb;
+        result = await db.signInWithPassword(email, password);
       } else if (supabase) {
         result = await supabase.auth.signInWithPassword({
           email,
@@ -133,7 +145,8 @@ const Home = () => {
         if (apiResult.error) throw new Error(apiResult.error);
         result = { error: null };
       } else if (isUsingLocalDb) {
-        result = await localDb.signOut();
+        const db = isUsingPostgres ? postgresDb : localDb;
+        result = await db.signOut();
       } else if (supabase) {
         result = await supabase.auth.signOut();
       } else {
@@ -177,8 +190,14 @@ const Home = () => {
               </span>
             )}
             {isUsingLocalDb && !isUsingApi && (
-              <span className="rounded-full bg-yellow-100 text-yellow-800 px-2 py-1 text-xs font-medium">
-                Local DB
+              <span
+                className={`rounded-full px-2 py-1 text-xs font-medium ${
+                  isUsingPostgres
+                    ? "bg-purple-100 text-purple-800"
+                    : "bg-yellow-100 text-yellow-800"
+                }`}
+              >
+                {isUsingPostgres ? "PostgreSQL" : "Local DB"}
               </span>
             )}
             {!isUsingApi && !isUsingLocalDb && supabase && (
@@ -217,13 +236,29 @@ const Home = () => {
           </div>
         )}
         {isUsingLocalDb && !isUsingApi && (
-          <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
-            <h3 className="text-sm font-medium text-blue-800 mb-2">
-              Local Database Mode
+          <div
+            className={`mb-6 rounded-lg border p-4 ${
+              isUsingPostgres
+                ? "border-purple-200 bg-purple-50"
+                : "border-blue-200 bg-blue-50"
+            }`}
+          >
+            <h3
+              className={`text-sm font-medium mb-2 ${
+                isUsingPostgres ? "text-purple-800" : "text-blue-800"
+              }`}
+            >
+              {isUsingPostgres
+                ? "PostgreSQL Database Mode"
+                : "Local Database Mode"}
             </h3>
-            <p className="text-xs text-blue-600">
-              Using local database for testing. Test credentials:
-              test@example.com / password123
+            <p
+              className={`text-xs ${
+                isUsingPostgres ? "text-purple-600" : "text-blue-600"
+              }`}
+            >
+              Using {isUsingPostgres ? "PostgreSQL" : "localStorage"} database
+              for testing. Test credentials: test@example.com / password123
             </p>
           </div>
         )}
@@ -231,10 +266,19 @@ const Home = () => {
         {session ? (
           <Dashboard
             session={session}
-            supabase={isUsingApi ? null : isUsingLocalDb ? localDb : supabase}
+            supabase={
+              isUsingApi
+                ? null
+                : isUsingLocalDb
+                  ? isUsingPostgres
+                    ? postgresDb
+                    : localDb
+                  : supabase
+            }
             apiService={isUsingApi ? apiService : null}
             isLocalDb={isUsingLocalDb && !isUsingApi}
             isUsingApi={isUsingApi}
+            isUsingPostgres={isUsingPostgres}
           />
         ) : (
           <div className="mx-auto max-w-md">

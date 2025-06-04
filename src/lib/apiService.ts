@@ -1,5 +1,6 @@
 // API service layer for handling HTTP requests
 import LocalDatabase from "./localDatabase";
+import PostgresDatabase from "./postgresDB";
 
 interface ApiResponse<T = any> {
   data?: T;
@@ -23,12 +24,35 @@ interface CreateItemRequest {
 class ApiService {
   private baseUrl: string;
   private localDb: LocalDatabase;
+  private postgresDb: PostgresDatabase;
   private token: string | null = null;
+  private usePostgres: boolean = false;
 
   constructor() {
     this.baseUrl = "/api";
     this.localDb = new LocalDatabase();
+    this.postgresDb = new PostgresDatabase();
     this.token = localStorage.getItem("auth_token");
+  }
+
+  async initializePostgres(): Promise<boolean> {
+    try {
+      const connected = await this.postgresDb.connect();
+      this.usePostgres = connected;
+      return connected;
+    } catch (error) {
+      console.warn("Failed to initialize PostgreSQL:", error);
+      this.usePostgres = false;
+      return false;
+    }
+  }
+
+  getActiveDatabase() {
+    return this.usePostgres ? this.postgresDb : this.localDb;
+  }
+
+  isUsingPostgres(): boolean {
+    return this.usePostgres;
   }
 
   private async makeRequest<T>(
@@ -71,10 +95,11 @@ class ApiService {
     try {
       const method = options.method || "GET";
       const body = options.body ? JSON.parse(options.body as string) : null;
+      const db = this.getActiveDatabase();
 
       switch (true) {
         case endpoint === "/auth/login" && method === "POST":
-          const loginResult = await this.localDb.signInWithPassword(
+          const loginResult = await db.signInWithPassword(
             body.email,
             body.password,
           );
@@ -85,25 +110,25 @@ class ApiService {
           return { data: loginResult.data, status: 200 };
 
         case endpoint === "/auth/logout" && method === "POST":
-          const logoutResult = await this.localDb.signOut();
+          const logoutResult = await db.signOut();
           this.token = null;
           localStorage.removeItem("auth_token");
           return { data: logoutResult, status: 200 };
 
         case endpoint === "/auth/session" && method === "GET":
-          const sessionResult = await this.localDb.getSession();
+          const sessionResult = await db.getSession();
           return { data: sessionResult.data, status: 200 };
 
         case endpoint.startsWith("/data") && method === "GET":
           const userId = this.getUserIdFromToken();
           if (!userId) throw new Error("Unauthorized");
-          const fetchResult = await this.localDb.fetchData(userId);
+          const fetchResult = await db.fetchData(userId);
           return { data: fetchResult.data, status: 200 };
 
         case endpoint.startsWith("/data") && method === "POST":
           const createUserId = this.getUserIdFromToken();
           if (!createUserId) throw new Error("Unauthorized");
-          const createResult = await this.localDb.createItem({
+          const createResult = await db.createItem({
             ...body,
             user_id: createUserId,
           });
@@ -112,13 +137,13 @@ class ApiService {
         case endpoint.includes("/data/") && method === "PUT":
           const itemId = endpoint.split("/").pop();
           if (!itemId) throw new Error("Item ID required");
-          const updateResult = await this.localDb.updateItem(itemId, body);
+          const updateResult = await db.updateItem(itemId, body);
           return { data: updateResult.data, status: 200 };
 
         case endpoint.includes("/data/") && method === "DELETE":
           const deleteItemId = endpoint.split("/").pop();
           if (!deleteItemId) throw new Error("Item ID required");
-          const deleteResult = await this.localDb.deleteItem(deleteItemId);
+          const deleteResult = await db.deleteItem(deleteItemId);
           return { data: deleteResult, status: 200 };
 
         default:
@@ -137,6 +162,10 @@ class ApiService {
     // For local testing, extract user ID from token
     if (this.token.startsWith("local_token_")) {
       return this.token.replace("local_token_", "");
+    }
+    // For PostgreSQL, extract user ID from token
+    if (this.token.startsWith("pg_token_")) {
+      return this.token.replace("pg_token_", "");
     }
     return null;
   }

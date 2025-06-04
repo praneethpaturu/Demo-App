@@ -59,6 +59,7 @@ interface DashboardProps {
   apiService?: any;
   isLocalDb?: boolean;
   isUsingApi?: boolean;
+  isUsingPostgres?: boolean;
   token?: string;
   onLogout?: () => void;
 }
@@ -69,6 +70,7 @@ const Dashboard: React.FC<DashboardProps> = ({
   apiService,
   isLocalDb = false,
   isUsingApi = false,
+  isUsingPostgres = false,
   token = "mock-token",
   onLogout = () => {},
 }) => {
@@ -306,7 +308,9 @@ const Dashboard: React.FC<DashboardProps> = ({
               {isUsingApi
                 ? "(API Mode)"
                 : isLocalDb
-                  ? "(Local Database)"
+                  ? isUsingPostgres
+                    ? "(PostgreSQL Database)"
+                    : "(Local Database)"
                   : "(Mock Data)"}
             </CardDescription>
           </div>
