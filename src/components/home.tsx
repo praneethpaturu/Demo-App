@@ -4,6 +4,7 @@ import LoginForm from "./LoginForm";
 import Dashboard from "./Dashboard";
 import LocalDatabase from "../lib/localDatabase";
 import PostgresDatabase from "../lib/postgresDB";
+import SQLiteDatabase from "../lib/sqliteDatabase";
 import ApiService from "../lib/apiService";
 import MockApiServer from "../lib/mockApiServer";
 
@@ -16,6 +17,7 @@ const environment = import.meta.env.VITE_APP_ENV || "development";
 const supabase =
   supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 const localDb = new LocalDatabase();
+const sqliteDb = new SQLiteDatabase();
 const postgresDb = new PostgresDatabase();
 const apiService = new ApiService();
 const mockApiServer = new MockApiServer();
@@ -30,6 +32,7 @@ const Home = () => {
     environment === "test" || !supabase,
   );
   const [isUsingPostgres, setIsUsingPostgres] = useState<boolean>(false);
+  const [isUsingSQLite, setIsUsingSQLite] = useState<boolean>(true);
   const [isUsingApi, setIsUsingApi] = useState<boolean>(false);
   const [apiStatus, setApiStatus] = useState<string>("checking");
   const [dbStatus, setDbStatus] = useState<string>("checking");
@@ -43,7 +46,18 @@ const Home = () => {
         // Initialize PostgreSQL connection
         const postgresConnected = await apiService.initializePostgres();
         setIsUsingPostgres(postgresConnected);
-        setDbStatus(postgresConnected ? "postgres" : "localStorage");
+
+        // Check SQLite availability
+        const sqliteAvailable = await sqliteDb.healthCheck();
+        setIsUsingSQLite(sqliteAvailable);
+
+        setDbStatus(
+          postgresConnected
+            ? "postgres"
+            : sqliteAvailable
+              ? "sqlite"
+              : "localStorage",
+        );
 
         // Check if API is available
         const apiAvailable = await apiService.healthCheck();
@@ -57,9 +71,13 @@ const Home = () => {
           setSession(data.session);
           setIsUsingLocalDb(false);
         } else if (environment === "test" || !supabase) {
-          // Use local database (PostgreSQL or localStorage)
+          // Use local database (PostgreSQL, SQLite, or localStorage)
           setIsUsingLocalDb(true);
-          const db = postgresConnected ? postgresDb : localDb;
+          const db = postgresConnected
+            ? postgresDb
+            : sqliteAvailable
+              ? sqliteDb
+              : localDb;
           const { data, error } = await db.getSession();
           if (error) throw error;
           setSession(data.session);
@@ -83,7 +101,11 @@ const Home = () => {
     // Set up auth state listener
     let authListener: any = null;
     if (isUsingLocalDb) {
-      const db = isUsingPostgres ? postgresDb : localDb;
+      const db = isUsingPostgres
+        ? postgresDb
+        : isUsingSQLite
+          ? sqliteDb
+          : localDb;
       const { data } = db.onAuthStateChange((_event, session) => {
         setSession(session);
       });
@@ -98,7 +120,7 @@ const Home = () => {
     return () => {
       authListener?.subscription.unsubscribe();
     };
-  }, [isUsingLocalDb, isUsingPostgres]);
+  }, [isUsingLocalDb, isUsingPostgres, isUsingSQLite]);
 
   const handleLogin = async (email: string, password: string) => {
     try {
@@ -111,7 +133,11 @@ const Home = () => {
         if (apiResult.error) throw new Error(apiResult.error);
         result = { data: apiResult.data, error: null };
       } else if (isUsingLocalDb) {
-        const db = isUsingPostgres ? postgresDb : localDb;
+        const db = isUsingPostgres
+          ? postgresDb
+          : isUsingSQLite
+            ? sqliteDb
+            : localDb;
         result = await db.signInWithPassword(email, password);
       } else if (supabase) {
         result = await supabase.auth.signInWithPassword({
@@ -145,7 +171,11 @@ const Home = () => {
         if (apiResult.error) throw new Error(apiResult.error);
         result = { error: null };
       } else if (isUsingLocalDb) {
-        const db = isUsingPostgres ? postgresDb : localDb;
+        const db = isUsingPostgres
+          ? postgresDb
+          : isUsingSQLite
+            ? sqliteDb
+            : localDb;
         result = await db.signOut();
       } else if (supabase) {
         result = await supabase.auth.signOut();
@@ -194,10 +224,16 @@ const Home = () => {
                 className={`rounded-full px-2 py-1 text-xs font-medium ${
                   isUsingPostgres
                     ? "bg-purple-100 text-purple-800"
-                    : "bg-yellow-100 text-yellow-800"
+                    : isUsingSQLite
+                      ? "bg-blue-100 text-blue-800"
+                      : "bg-yellow-100 text-yellow-800"
                 }`}
               >
-                {isUsingPostgres ? "PostgreSQL" : "Local DB"}
+                {isUsingPostgres
+                  ? "PostgreSQL"
+                  : isUsingSQLite
+                    ? "SQLite"
+                    : "Local DB"}
               </span>
             )}
             {!isUsingApi && !isUsingLocalDb && supabase && (
@@ -240,25 +276,43 @@ const Home = () => {
             className={`mb-6 rounded-lg border p-4 ${
               isUsingPostgres
                 ? "border-purple-200 bg-purple-50"
-                : "border-blue-200 bg-blue-50"
+                : isUsingSQLite
+                  ? "border-blue-200 bg-blue-50"
+                  : "border-yellow-200 bg-yellow-50"
             }`}
           >
             <h3
               className={`text-sm font-medium mb-2 ${
-                isUsingPostgres ? "text-purple-800" : "text-blue-800"
+                isUsingPostgres
+                  ? "text-purple-800"
+                  : isUsingSQLite
+                    ? "text-blue-800"
+                    : "text-yellow-800"
               }`}
             >
               {isUsingPostgres
                 ? "PostgreSQL Database Mode"
-                : "Local Database Mode"}
+                : isUsingSQLite
+                  ? "SQLite Database Mode"
+                  : "Local Database Mode"}
             </h3>
             <p
               className={`text-xs ${
-                isUsingPostgres ? "text-purple-600" : "text-blue-600"
+                isUsingPostgres
+                  ? "text-purple-600"
+                  : isUsingSQLite
+                    ? "text-blue-600"
+                    : "text-yellow-600"
               }`}
             >
-              Using {isUsingPostgres ? "PostgreSQL" : "localStorage"} database
-              for testing. Test credentials: test@example.com / password123
+              Using{" "}
+              {isUsingPostgres
+                ? "PostgreSQL"
+                : isUsingSQLite
+                  ? "SQLite"
+                  : "localStorage"}{" "}
+              database for testing. Test credentials: test@example.com /
+              password123
             </p>
           </div>
         )}
@@ -272,13 +326,16 @@ const Home = () => {
                 : isUsingLocalDb
                   ? isUsingPostgres
                     ? postgresDb
-                    : localDb
+                    : isUsingSQLite
+                      ? sqliteDb
+                      : localDb
                   : supabase
             }
             apiService={isUsingApi ? apiService : null}
             isLocalDb={isUsingLocalDb && !isUsingApi}
             isUsingApi={isUsingApi}
             isUsingPostgres={isUsingPostgres}
+            isUsingSQLite={isUsingSQLite}
           />
         ) : (
           <div className="mx-auto max-w-md">

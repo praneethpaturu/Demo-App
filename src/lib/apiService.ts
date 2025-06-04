@@ -1,6 +1,7 @@
 // API service layer for handling HTTP requests
 import LocalDatabase from "./localDatabase";
 import PostgresDatabase from "./postgresDB";
+import SQLiteDatabase from "./sqliteDatabase";
 
 interface ApiResponse<T = any> {
   data?: T;
@@ -25,14 +26,18 @@ class ApiService {
   private baseUrl: string;
   private localDb: LocalDatabase;
   private postgresDb: PostgresDatabase;
+  private sqliteDb: SQLiteDatabase;
   private token: string | null = null;
   private usePostgres: boolean = false;
+  private useSQLite: boolean = false;
 
   constructor() {
     this.baseUrl = "/api";
     this.localDb = new LocalDatabase();
     this.postgresDb = new PostgresDatabase();
+    this.sqliteDb = new SQLiteDatabase();
     this.token = localStorage.getItem("auth_token");
+    this.initializeSQLite();
   }
 
   async initializePostgres(): Promise<boolean> {
@@ -47,12 +52,32 @@ class ApiService {
     }
   }
 
+  async initializeSQLite(): Promise<boolean> {
+    try {
+      const available = await this.sqliteDb.healthCheck();
+      this.useSQLite = available;
+      return available;
+    } catch (error) {
+      console.warn("Failed to initialize SQLite:", error);
+      this.useSQLite = false;
+      return false;
+    }
+  }
+
   getActiveDatabase() {
-    return this.usePostgres ? this.postgresDb : this.localDb;
+    return this.usePostgres
+      ? this.postgresDb
+      : this.useSQLite
+        ? this.sqliteDb
+        : this.localDb;
   }
 
   isUsingPostgres(): boolean {
     return this.usePostgres;
+  }
+
+  isUsingSQLite(): boolean {
+    return this.useSQLite;
   }
 
   private async makeRequest<T>(
@@ -171,6 +196,10 @@ class ApiService {
     // For PostgreSQL, extract user ID from token
     if (this.token.startsWith("pg_token_")) {
       return this.token.replace("pg_token_", "");
+    }
+    // For SQLite, extract user ID from token
+    if (this.token.startsWith("sqlite_token_")) {
+      return this.token.replace("sqlite_token_", "");
     }
     return null;
   }

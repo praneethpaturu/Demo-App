@@ -1,5 +1,6 @@
 // Mock API server for development and testing
 import LocalDatabase from "./localDatabase";
+import SQLiteDatabase from "./sqliteDatabase";
 
 interface MockRequest {
   method: string;
@@ -16,12 +17,19 @@ interface MockResponse {
 
 class MockApiServer {
   private localDb: LocalDatabase;
+  private sqliteDb: SQLiteDatabase;
   private routes: Map<string, (req: MockRequest) => Promise<MockResponse>>;
+  private useSQLite: boolean = true;
 
   constructor() {
     this.localDb = new LocalDatabase();
+    this.sqliteDb = new SQLiteDatabase();
     this.routes = new Map();
     this.setupRoutes();
+  }
+
+  private getActiveDatabase() {
+    return this.useSQLite ? this.sqliteDb : this.localDb;
   }
 
   private setupRoutes() {
@@ -35,7 +43,8 @@ class MockApiServer {
     this.routes.set("POST /api/auth/login", async (req) => {
       try {
         const { email, password } = req.body;
-        const result = await this.localDb.signInWithPassword(email, password);
+        const db = this.getActiveDatabase();
+        const result = await db.signInWithPassword(email, password);
         return {
           status: 200,
           data: result.data,
@@ -51,7 +60,8 @@ class MockApiServer {
 
     this.routes.set("POST /api/auth/logout", async () => {
       try {
-        const result = await this.localDb.signOut();
+        const db = this.getActiveDatabase();
+        const result = await db.signOut();
         return {
           status: 200,
           data: result,
@@ -66,7 +76,8 @@ class MockApiServer {
 
     this.routes.set("GET /api/auth/session", async () => {
       try {
-        const result = await this.localDb.getSession();
+        const db = this.getActiveDatabase();
+        const result = await db.getSession();
         return {
           status: 200,
           data: result.data,
@@ -87,7 +98,8 @@ class MockApiServer {
         if (!userId) {
           return { status: 401, error: "Unauthorized" };
         }
-        const result = await this.localDb.fetchData(userId);
+        const db = this.getActiveDatabase();
+        const result = await db.fetchData(userId);
         return {
           status: 200,
           data: result.data,
@@ -107,7 +119,8 @@ class MockApiServer {
         if (!userId) {
           return { status: 401, error: "Unauthorized" };
         }
-        const result = await this.localDb.createItem({
+        const db = this.getActiveDatabase();
+        const result = await db.createItem({
           ...req.body,
           user_id: userId,
         });
@@ -134,7 +147,8 @@ class MockApiServer {
         if (!itemId) {
           return { status: 400, error: "Item ID required" };
         }
-        const result = await this.localDb.updateItem(itemId, req.body);
+        const db = this.getActiveDatabase();
+        const result = await db.updateItem(itemId, req.body);
         return {
           status: 200,
           data: result.data,
@@ -154,11 +168,12 @@ class MockApiServer {
         if (!userId) {
           return { status: 401, error: "Unauthorized" };
         }
-        const itemId = this.extractIdFromUrl(req.url);
-        if (!itemId) {
+        const deleteItemId = this.extractIdFromUrl(req.url);
+        if (!deleteItemId) {
           return { status: 400, error: "Item ID required" };
         }
-        const result = await this.localDb.deleteItem(itemId);
+        const db = this.getActiveDatabase();
+        const result = await db.deleteItem(deleteItemId);
         return {
           status: 200,
           data: result,
@@ -180,6 +195,9 @@ class MockApiServer {
     const token = authHeader.replace("Bearer ", "");
     if (token.startsWith("local_token_")) {
       return token.replace("local_token_", "");
+    }
+    if (token.startsWith("sqlite_token_")) {
+      return token.replace("sqlite_token_", "");
     }
     return null;
   }
