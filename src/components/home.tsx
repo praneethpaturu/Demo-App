@@ -2,29 +2,47 @@ import React, { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 import LoginForm from "./LoginForm";
 import Dashboard from "./Dashboard";
+import LocalDatabase from "../lib/localDatabase";
 
-// Create a Supabase client
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "";
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "";
-const supabase = createClient(supabaseUrl, supabaseKey);
+// Create a Supabase client with proper error handling
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const environment = import.meta.env.VITE_APP_ENV || "development";
+
+// Create database client based on environment
+const supabase =
+  supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+const localDb = new LocalDatabase();
 
 const Home = () => {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [environment, setEnvironment] = useState<string>("development");
+  const [currentEnvironment, setCurrentEnvironment] =
+    useState<string>(environment);
   const [error, setError] = useState<string | null>(null);
+  const [isUsingLocalDb, setIsUsingLocalDb] = useState<boolean>(
+    environment === "test" || !supabase,
+  );
 
   useEffect(() => {
     // Check for existing session
     const checkSession = async () => {
       try {
-        const { data, error } = await supabase.auth.getSession();
-        if (error) throw error;
-        setSession(data.session);
+        setCurrentEnvironment(environment);
 
-        // Determine environment
-        const env = import.meta.env.VITE_APP_ENV || "development";
-        setEnvironment(env);
+        if (environment === "test" || !supabase) {
+          // Use local database
+          setIsUsingLocalDb(true);
+          const { data, error } = await localDb.getSession();
+          if (error) throw error;
+          setSession(data.session);
+        } else {
+          // Use Supabase
+          setIsUsingLocalDb(false);
+          const { data, error } = await supabase.auth.getSession();
+          if (error) throw error;
+          setSession(data.session);
+        }
       } catch (error) {
         console.error("Error checking session:", error);
         setError("Failed to check authentication status");
@@ -36,27 +54,43 @@ const Home = () => {
     checkSession();
 
     // Set up auth state listener
-    const { data: authListener } = supabase.auth.onAuthStateChange(
-      (_event, session) => {
+    let authListener: any = null;
+    if (isUsingLocalDb) {
+      const { data } = localDb.onAuthStateChange((_event, session) => {
         setSession(session);
-      },
-    );
+      });
+      authListener = data;
+    } else if (supabase) {
+      const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+        setSession(session);
+      });
+      authListener = data;
+    }
 
     return () => {
       authListener?.subscription.unsubscribe();
     };
-  }, []);
+  }, [isUsingLocalDb]);
 
   const handleLogin = async (email: string, password: string) => {
     try {
       setLoading(true);
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
 
-      if (error) throw error;
-      setSession(data.session);
+      let result;
+      if (isUsingLocalDb) {
+        result = await localDb.signInWithPassword(email, password);
+      } else if (supabase) {
+        result = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+      } else {
+        setError("No database configuration available.");
+        return;
+      }
+
+      if (result.error) throw result.error;
+      setSession(result.data.session);
       setError(null);
     } catch (error: any) {
       console.error("Error logging in:", error);
@@ -69,8 +103,18 @@ const Home = () => {
   const handleLogout = async () => {
     try {
       setLoading(true);
-      const { error } = await supabase.auth.signOut();
-      if (error) throw error;
+
+      let result;
+      if (isUsingLocalDb) {
+        result = await localDb.signOut();
+      } else if (supabase) {
+        result = await supabase.auth.signOut();
+      } else {
+        setError("No database configuration available.");
+        return;
+      }
+
+      if (result.error) throw result.error;
       setSession(null);
     } catch (error: any) {
       console.error("Error logging out:", error);
@@ -98,8 +142,13 @@ const Home = () => {
           <div className="flex items-center gap-2">
             <h1 className="text-xl font-bold">3-Tier Test Application</h1>
             <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
-              {environment}
+              {currentEnvironment}
             </span>
+            {isUsingLocalDb && (
+              <span className="rounded-full bg-yellow-100 text-yellow-800 px-2 py-1 text-xs font-medium">
+                Local DB
+              </span>
+            )}
           </div>
           {session && (
             <button
@@ -119,8 +168,24 @@ const Home = () => {
           </div>
         )}
 
+        {isUsingLocalDb && (
+          <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
+            <h3 className="text-sm font-medium text-blue-800 mb-2">
+              Local Database Mode
+            </h3>
+            <p className="text-xs text-blue-600">
+              Using local database for testing. Test credentials:
+              test@example.com / password123
+            </p>
+          </div>
+        )}
+
         {session ? (
-          <Dashboard session={session} supabase={supabase} />
+          <Dashboard
+            session={session}
+            supabase={isUsingLocalDb ? localDb : supabase}
+            isLocalDb={isUsingLocalDb}
+          />
         ) : (
           <div className="mx-auto max-w-md">
             <LoginForm onLogin={handleLogin} error={error} />

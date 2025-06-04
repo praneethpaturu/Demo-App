@@ -54,11 +54,17 @@ interface DataItem {
 }
 
 interface DashboardProps {
+  session?: any;
+  supabase?: any;
+  isLocalDb?: boolean;
   token?: string;
   onLogout?: () => void;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({
+  session,
+  supabase,
+  isLocalDb = false,
   token = "mock-token",
   onLogout = () => {},
 }) => {
@@ -104,23 +110,24 @@ const Dashboard: React.FC<DashboardProps> = ({
     },
   ];
 
-  // Simulate API fetch
+  // Fetch data from database
   const fetchData = async () => {
     setLoading(true);
     setError(null);
 
     try {
-      // Simulate API call delay
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-
-      // In a real app, this would be an API call
-      // const response = await fetch('/api/data', {
-      //   headers: { Authorization: `Bearer ${token}` }
-      // });
-      // const result = await response.json();
-      // if (!response.ok) throw new Error(result.message || 'Failed to fetch data');
-
-      setData(mockData);
+      if (isLocalDb && supabase && session?.user?.id) {
+        // Use local database
+        const { data: items, error } = await supabase.fetchData(
+          session.user.id,
+        );
+        if (error) throw error;
+        setData(items || []);
+      } else {
+        // Fallback to mock data
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        setData(mockData);
+      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "An unknown error occurred",
@@ -157,23 +164,53 @@ const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleFormSubmit = async (formData: Partial<DataItem>) => {
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      if (isLocalDb && supabase && session?.user?.id) {
+        if (formMode === "create") {
+          const { data: newItem, error } = await supabase.createItem({
+            name: formData.name || "",
+            description: formData.description || "",
+            status: formData.status || "pending",
+            category: formData.category,
+            quantity: formData.quantity,
+            user_id: session.user.id,
+          });
+          if (error) throw error;
+          setData([...data, newItem]);
+        } else if (formMode === "edit" && selectedItem) {
+          const { data: updatedItem, error } = await supabase.updateItem(
+            selectedItem.id,
+            formData,
+          );
+          if (error) throw error;
+          const updatedData = data.map((item) =>
+            item.id === selectedItem.id ? updatedItem : item,
+          );
+          setData(updatedData);
+        }
+      } else {
+        // Fallback to mock behavior
+        await new Promise((resolve) => setTimeout(resolve, 500));
 
-    if (formMode === "create") {
-      const newItem: DataItem = {
-        id: `${Date.now()}`,
-        name: formData.name || "",
-        description: formData.description || "",
-        status: formData.status || "pending",
-        createdAt: new Date().toISOString(),
-      };
-      setData([...data, newItem]);
-    } else if (formMode === "edit" && selectedItem) {
-      const updatedData = data.map((item) =>
-        item.id === selectedItem.id ? { ...item, ...formData } : item,
-      );
-      setData(updatedData);
+        if (formMode === "create") {
+          const newItem: DataItem = {
+            id: `${Date.now()}`,
+            name: formData.name || "",
+            description: formData.description || "",
+            status: formData.status || "pending",
+            createdAt: new Date().toISOString(),
+          };
+          setData([...data, newItem]);
+        } else if (formMode === "edit" && selectedItem) {
+          const updatedData = data.map((item) =>
+            item.id === selectedItem.id ? { ...item, ...formData } : item,
+          );
+          setData(updatedData);
+        }
+      }
+    } catch (error) {
+      console.error("Error submitting form:", error);
+      setError(error instanceof Error ? error.message : "Failed to save item");
     }
 
     setFormOpen(false);
@@ -182,11 +219,24 @@ const Dashboard: React.FC<DashboardProps> = ({
   const handleDeleteConfirm = async () => {
     if (!deleteItemId) return;
 
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      if (isLocalDb && supabase) {
+        const { error } = await supabase.deleteItem(deleteItemId);
+        if (error) throw error;
+      } else {
+        // Simulate API call
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
 
-    const filteredData = data.filter((item) => item.id !== deleteItemId);
-    setData(filteredData);
+      const filteredData = data.filter((item) => item.id !== deleteItemId);
+      setData(filteredData);
+    } catch (error) {
+      console.error("Error deleting item:", error);
+      setError(
+        error instanceof Error ? error.message : "Failed to delete item",
+      );
+    }
+
     setDeleteDialogOpen(false);
     setDeleteItemId(null);
   };
@@ -215,7 +265,9 @@ const Dashboard: React.FC<DashboardProps> = ({
         <CardHeader className="flex flex-row items-center justify-between pb-2">
           <div>
             <CardTitle className="text-2xl font-bold">Dashboard</CardTitle>
-            <CardDescription>Manage your data entries</CardDescription>
+            <CardDescription>
+              Manage your data entries {isLocalDb && "(Local Database)"}
+            </CardDescription>
           </div>
           <div className="flex space-x-2">
             <Button
